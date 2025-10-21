@@ -77,7 +77,7 @@ The model will be automatically downloaded on first run to `~/.cache/huggingface
 If you encounter GPU-related errors:
 ```bash
 # Check NVIDIA Docker installation
-docker run --rm --gpus all nvidia/cuda:11.8-base-ubuntu22.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.1.1-runtime-ubuntu22.04 nvidia-smi
 
 # Check if GPU is accessible in container
 docker-compose exec llm-service nvidia-smi

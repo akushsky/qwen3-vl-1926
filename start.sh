@@ -11,7 +11,7 @@ if ! docker info > /dev/null 2>&1; then
 fi
 
 # Check if nvidia-docker is available
-if ! docker run --rm --gpus all nvidia/cuda:11.8-base-ubuntu22.04 nvidia-smi > /dev/null 2>&1; then
+if ! docker run --rm --gpus all nvidia/cuda:12.1.1-runtime-ubuntu22.04 nvidia-smi > /dev/null 2>&1; then
     echo "⚠️  Warning: NVIDIA Docker not detected. GPU acceleration may not work."
     echo "   Make sure nvidia-docker2 is installed and Docker is configured for GPU support."
 fi
