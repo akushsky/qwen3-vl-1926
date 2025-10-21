@@ -1,0 +1,387 @@
+/* Custom styles for Kharkov-1926 Document Processor */
+
+body {
+    background-color: #f8f9fa;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.sidebar {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    color: white;
+    padding: 0;
+}
+
+.sidebar-content {
+    padding: 2rem;
+}
+
+.sidebar h2 {
+    color: white;
+    font-weight: 300;
+}
+
+/* Ensure good contrast for cards inside the colored sidebar */
+.sidebar .card {
+    background-color: #ffffff;
+    color: #212529;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.sidebar .card-header {
+    background-color: #f1f3f5;
+    color: #212529;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.sidebar .card-body,
+.sidebar .form-label,
+.sidebar .form-check-label,
+.sidebar .text-muted,
+.sidebar label,
+.sidebar p,
+.sidebar h5 {
+    color: #212529 !important;
+}
+
+.main-content {
+    padding: 2rem;
+    background-color: white;
+    min-height: 100vh;
+}
+
+.content-wrapper {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+/* Upload Area Styles */
+.upload-area {
+    border: 3px dashed #dee2e6;
+    border-radius: 10px;
+    padding: 3rem;
+    text-align: center;
+    background-color: #f8f9fa;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.upload-area:hover {
+    border-color: #007bff;
+    background-color: #e3f2fd;
+}
+
+.upload-area.dragover {
+    border-color: #28a745;
+    background-color: #d4edda;
+    transform: scale(1.02);
+}
+
+.upload-content {
+    pointer-events: none;
+}
+
+.upload-area:hover .upload-content {
+    pointer-events: auto;
+}
+
+/* File Preview Styles */
+.file-preview {
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    padding: 1.5rem;
+    border: 1px solid #dee2e6;
+}
+
+.file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem;
+    background-color: white;
+    border-radius: 6px;
+    margin-bottom: 0.5rem;
+    border: 1px solid #e9ecef;
+}
+
+.file-item:last-child {
+    margin-bottom: 0;
+}
+
+.file-info {
+    display: flex;
+    align-items: center;
+}
+
+.file-icon {
+    margin-right: 0.75rem;
+    color: #6c757d;
+}
+
+.file-details {
+    display: flex;
+    flex-direction: column;
+}
+
+.file-name {
+    font-weight: 500;
+    margin: 0;
+}
+
+.file-size {
+    font-size: 0.875rem;
+    color: #6c757d;
+    margin: 0;
+}
+
+.file-status {
+    display: flex;
+    align-items: center;
+}
+
+.status-badge {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.status-ready {
+    background-color: #d1ecf1;
+    color: #0c5460;
+}
+
+.status-processing {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+.status-complete {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.status-error {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+/* Results Styles */
+.results-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1rem;
+}
+
+.result-card {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 1.5rem;
+    background-color: white;
+}
+
+.result-header {
+    display: flex;
+    justify-content: between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.result-title {
+    font-weight: 600;
+    margin: 0;
+    color: #495057;
+}
+
+.result-badge {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.badge-jewish {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.badge-non-jewish {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.badge-uncertain {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+.result-content {
+    margin-bottom: 1rem;
+}
+
+.result-field {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+    padding: 0.25rem 0;
+}
+
+.result-label {
+    font-weight: 500;
+    color: #6c757d;
+}
+
+.result-value {
+    color: #495057;
+}
+
+.result-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+}
+
+/* Crop Images */
+.crop-images {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.crop-image {
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    overflow: hidden;
+    background-color: #f8f9fa;
+}
+
+.crop-image img {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.crop-caption {
+    padding: 0.5rem;
+    background-color: #f8f9fa;
+    font-size: 0.875rem;
+    color: #6c757d;
+    text-align: center;
+}
+
+/* Loading States */
+.loading-spinner {
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .sidebar {
+        min-height: auto;
+    }
+    
+    .main-content {
+        padding: 1rem;
+    }
+    
+    .upload-area {
+        padding: 2rem 1rem;
+    }
+    
+    .results-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .crop-images {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+/* Animation for file upload */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.file-preview {
+    animation: fadeInUp 0.3s ease-out;
+}
+
+/* Progress Bar */
+.progress-container {
+    margin: 1rem 0;
+}
+
+.progress {
+    height: 8px;
+    border-radius: 4px;
+}
+
+.progress-bar {
+    transition: width 0.3s ease;
+}
+
+/* Error States */
+.error-message {
+    background-color: #f8d7da;
+    color: #721c24;
+    padding: 1rem;
+    border-radius: 6px;
+    border: 1px solid #f5c6cb;
+    margin: 1rem 0;
+}
+
+.success-message {
+    background-color: #d4edda;
+    color: #155724;
+    padding: 1rem;
+    border-radius: 6px;
+    border: 1px solid #c3e6cb;
+    margin: 1rem 0;
+}
+

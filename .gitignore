@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+
+# Environments
+.venv/
+venv/
+env/
+.env
+
+# OS / Editors
+.DS_Store
+.idea/
+.vscode/
+
+# App runtime artifacts
+uploads/
+results/
+out/
+crops/
+
+# Logs
+*.log
+
+
