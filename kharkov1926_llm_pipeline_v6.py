@@ -26,8 +26,8 @@ Environment:
     OPENAI_API_KEY (default: EMPTY)
 """
 
-import os, io, re, json, base64, argparse, glob, shutil, time, random
-from typing import Dict, Any, Tuple, List, Optional, Callable
+import os, io, re, json, base64, argparse, glob, shutil
+from typing import Dict, Any, Tuple, List
 from PIL import Image, ImageDraw
 import requests
 
@@ -102,137 +102,6 @@ def b64_image(img: Image.Image, fmt="JPEG", quality=92) -> str:
         mime = "image/png"
     b64 = base64.b64encode(bio.getvalue()).decode("ascii")
     return f"data:{mime};base64,{b64}"
-
-def downscale_if_needed(img: Image.Image, max_side: int = 1200) -> Image.Image:
-    """Downscale large images to keep payload small while preserving aspect ratio."""
-    w, h = img.size
-    m = max(w, h)
-    if m <= max_side:
-        return img
-    scale = max_side / float(m)
-    new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
-    return img.resize(new_size)
-
-def stack_vertical(top_img: Image.Image, bottom_img: Image.Image, padding: int = 8, bg=(255,255,255)) -> Image.Image:
-    """Stack two images vertically into a single composite (to fit 1-image models)."""
-    t = top_img.convert("RGB")
-    b = bottom_img.convert("RGB")
-    width = max(t.width, b.width)
-    height = t.height + padding + b.height
-    canvas = Image.new("RGB", (width, height), color=bg)
-    canvas.paste(t, (0, 0))
-    canvas.paste(b, (0, t.height + padding))
-    return canvas
-
-# ----------------------------
-# Downloader (polite range fetcher)
-# ----------------------------
-DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) "
-    "Gecko/20100101 Firefox/115.0"
-)
-
-def download_image_range(start: int, end: int, url_template: str,
-                         dest_dir: str,
-                         user_agent: str = DEFAULT_USER_AGENT,
-                         sleep_min: float = 0.0,
-                         sleep_max: float = 0.0,
-                         timeout: int = 30,
-                         retries: int = 2,
-                         resume: bool = True,
-                         per_file_callback: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
-    """Download sequential images using a URL template with {i} placeholder.
-
-    Writes to dest_dir with filenames derived from URL basename. Supports simple
-    resume via .part files and HTTP Range. Skips existing completed files.
-    Returns stats dict with counts and error list.
-    """
-    ensure_dir(dest_dir)
-    headers_base = {"User-Agent": user_agent, "Accept": "*/*"}
-
-    downloaded = 0
-    skipped = 0
-    errors: List[Dict[str, Any]] = []
-
-    for idx in range(int(start), int(end) + 1):
-        url = url_template.format(i=idx)
-        filename = os.path.basename(url)
-        final_path = os.path.join(dest_dir, filename)
-        part_path = final_path + ".part"
-
-        if os.path.exists(final_path) and os.path.getsize(final_path) > 0:
-            skipped += 1
-            # polite sleep even on skip to avoid bursty HEADs
-            time.sleep(random.uniform(sleep_min, sleep_max))
-            continue
-
-        attempt = 0
-        while attempt <= retries:
-            attempt += 1
-            headers = dict(headers_base)
-            mode = "wb"
-            existing = 0
-            if resume and os.path.exists(part_path):
-                try:
-                    existing = os.path.getsize(part_path)
-                except Exception:
-                    existing = 0
-            if resume and existing > 0:
-                headers["Range"] = f"bytes={existing}-"
-                mode = "ab"
-
-            try:
-                with requests.get(url, headers=headers, stream=True, timeout=timeout) as r:
-                    if r.status_code == 416:
-                        # Range not satisfiable — fall back to full re-download
-                        headers.pop("Range", None)
-                        existing = 0
-                        mode = "wb"
-                        with requests.get(url, headers=headers, stream=True, timeout=timeout) as r2:
-                            r2.raise_for_status()
-                            with open(part_path, mode) as f:
-                                for chunk in r2.iter_content(chunk_size=64 * 1024):
-                                    if chunk:
-                                        f.write(chunk)
-                        os.replace(part_path, final_path)
-                        if per_file_callback:
-                            try:
-                                per_file_callback(final_path)
-                            except Exception:
-                                pass
-                        downloaded += 1
-                        break
-
-                    # If we asked for Range but server responded 200, start fresh
-                    if r.status_code == 200 and "Range" in headers:
-                        existing = 0
-                        mode = "wb"
-
-                    r.raise_for_status()
-                    with open(part_path, mode) as f:
-                        for chunk in r.iter_content(chunk_size=64 * 1024):
-                            if chunk:
-                                f.write(chunk)
-                    os.replace(part_path, final_path)
-                    if per_file_callback:
-                        try:
-                            per_file_callback(final_path)
-                        except Exception:
-                            pass
-                    downloaded += 1
-                    break
-            except Exception as e:
-                if attempt > retries:
-                    errors.append({"i": idx, "url": url, "error": str(e)})
-                else:
-                    # brief backoff inside [sleep_min, sleep_max]
-                    time.sleep(random.uniform(sleep_min, sleep_max))
-
-        # polite sleep between items regardless of outcome
-        if sleep_max > 0.0 or sleep_min > 0.0:
-            time.sleep(random.uniform(sleep_min, sleep_max))
-
-    return {"start": start, "end": end, "downloaded": downloaded, "skipped": skipped, "errors": errors}
 
 def call_vllm(messages: list, temperature: float=0.0, max_tokens: int=128, timeout: int=180) -> str:
     """OpenAI-compatible /v1/chat/completions call. Returns raw assistant content string."""
@@ -366,22 +235,6 @@ USR_FIO = (
     "Имя/отчество — по нормализованным инициалам (UA→RU) только если слева неразборчиво. При сомнении отчества верни null. Верни РОВНО JSON по схеме."
 )
 
-# Page-type classifier (full-page image → page1 | page2 | other)
-SYS_CLASSIFY_PAGE = (
-    "Ты — точный классификатор сканов архивных листов (1926). Задача — определить ТИП СТРАНИЦЫ.\n\n"
-    "Опорные признаки:\n"
-    "page1: заголовок с крупным текстом \"Всесоюзный перепис... 1926\" / \"СІМЕЙНА КАРТКА\" / \"СЕМЕЙНАЯ КАРТА\"; структурированная анкета с пунктами ~1..17, короткие строки с подписями; нет плотной колонной таблицы.\n"
-    "page2: широкая таблица на всю страницу, много узких столбцов и десяток+ строк; слева вертикальные/горизонтальные линии, подписи вроде \"Число членов семьи\", \"Возраст\", \"Занятие\"; нет заголовка формы вверху.\n"
-    "other: обложка, оборотная сторона, пустые/технические листы, дубликаты с чужой разметкой и т.п.\n\n"
-    "Тебе даны ДВА обрезка одной страницы: (1) верхняя полоса (header), (2) левая полоса таблицы (left).\n"
-    "Важно: верни только одно из page1/page2/other. Не путай из-за рукописных пометок.\n"
-    "Верни СТРОГО JSON без комментариев: {\n"
-    "  \"type\": \"page1\"|\"page2\"|\"other\",\n"
-    "  \"confidence\": 0..1,\n"
-    "  \"reason\": \"кратко, какие признаки увидел\"\n"
-    "}."
-)
-
 # ----------------------------
 # LLM steps
 # ----------------------------
@@ -433,33 +286,6 @@ def step_fio_left(img_cropped: Image.Image, surname_right: str, init_name: str, 
     ]
     content = call_vllm(messages, temperature=0.0, max_tokens=180)
     return parse_json_or_extract(content)
-
-def step_classify_page_from_crops(full_img: Image.Image) -> Dict[str, Any]:
-    # Two informative regions: top header band and left table/sidebar band
-    w, h = full_img.size
-    # Header band: central horizontal strip near top
-    header_crop, _ = crop_percent(full_img, (0.08, 0.02, 0.92, 0.20), pad=0.0)
-    # Left band: left vertical region excluding very top (to catch page2 table sidebar)
-    left_crop, _ = crop_percent(full_img, (0.00, 0.12, 0.26, 0.96), pad=0.0)
-    header_small = downscale_if_needed(header_crop, 900)
-    left_small = downscale_if_needed(left_crop, 900)
-    # Compose into a single image (top=header, bottom=left) due to 1-image limit
-    composite = stack_vertical(header_small, left_small, padding=6)
-    messages = [
-        {"role": "system", "content": SYS_CLASSIFY_PAGE},
-        {"role": "user", "content": [
-            {"type": "text", "text": "На одном изображении сверху — header (верхняя полоса), снизу — left (левая полоса). Определи тип: page1/page2/other. Верни РОВНО JSON."},
-            {"type": "image_url", "image_url": {"url": b64_image(composite, fmt="JPEG", quality=85)}},
-        ]},
-    ]
-    content = call_vllm(messages, temperature=0.0, max_tokens=96)
-    out = parse_json_or_extract(content)
-    t = (out.get("type") if isinstance(out, dict) else None) or "other"
-    if t not in ("page1", "page2", "other"):
-        t = "other"
-    conf = float(out.get("confidence") or 0.0) if isinstance(out, dict) else 0.0
-    reason = (out.get("reason") if isinstance(out, dict) else None) or ""
-    return {"type": t, "confidence": conf, "reason": reason, "raw": out}
 
 # ----------------------------
 # Variant-aware cropping
@@ -680,76 +506,6 @@ def run_batch(input_dir: str, outdir: str, pad: float, overlay: bool, enforce_in
             results.append({"pair": [p1, p2], "error": str(e)})
     return {"count": len(results), "items": results}
 
-def classify_directory(input_dir: str, log_path: str = None) -> Dict[str, Any]:
-    """Classify all images in a directory into page1/page2/other using LLM.
-    Returns dict with lists and per-file scores.
-    """
-    exts = ("*.jpg","*.jpeg","*.png","*.JPG","*.JPEG","*.PNG")
-    files: List[str] = []
-    for ext in exts:
-        files.extend(glob.glob(os.path.join(input_dir, ext)))
-    files = sorted(files)
-    classified = {"page1": [], "page2": [], "other": []}
-    details = {}
-    for fp in files:
-        try:
-            im = Image.open(fp)
-            res = step_classify_page_from_crops(im)
-            t = res.get("type", "other")
-            c = float(res.get("confidence") or 0.0)
-            classified.get(t, classified["other"]).append(fp)
-            details[fp] = {"type": t, "confidence": c}
-            if log_path:
-                try:
-                    with open(log_path, "a", encoding="utf-8") as lf:
-                        log_item = {"file": fp, "type": t, "confidence": c, "reason": res.get("reason"), "raw": res.get("raw")}
-                        lf.write(json.dumps(log_item, ensure_ascii=False) + "\n")
-                except Exception:
-                    pass
-        except Exception as e:
-            details[fp] = {"type": "error", "error": str(e)}
-            classified["other"].append(fp)
-    return {"classified": classified, "details": details}
-
-def pair_by_nearest(classified: Dict[str, Any]) -> List[Tuple[str, str]]:
-    """Pair page1/page2 by nearest index after sorting by filename, skipping duplicates.
-    Greedy: for each page1 in order, pick the closest later page2 that is unused.
-    """
-    p1s = sorted(classified.get("page1") or [])
-    p2s = sorted(classified.get("page2") or [])
-    used_p2 = set()
-    pairs: List[Tuple[str, str]] = []
-    for p1 in p1s:
-        # find the first p2 with name >= p1 and not used
-        candidates = [p2 for p2 in p2s if p2 not in used_p2 and p2 >= p1]
-        chosen = candidates[0] if candidates else None
-        if not chosen:
-            # fallback: any unused p2
-            fallback = [p2 for p2 in p2s if p2 not in used_p2]
-            chosen = fallback[0] if fallback else None
-        if chosen:
-            used_p2.add(chosen)
-            pairs.append((p1, chosen))
-    return pairs
-
-def run_batch_from_pairs(pairs: List[Tuple[str, str]], outdir: str, pad: float, overlay: bool,
-                         enforce_initials: bool, roi_config: Dict[str, Any]) -> Dict[str, Any]:
-    ensure_dir(outdir)
-    results = []
-    for p1, p2 in pairs:
-        pair_name = f"{os.path.splitext(os.path.basename(p1))[0]}__{os.path.splitext(os.path.basename(p2))[0]}"
-        pair_outdir = os.path.join(outdir, pair_name)
-        ensure_dir(pair_outdir)
-        try:
-            res = run_pipeline(p1, p2, outdir=pair_outdir, pad=pad, overlay=overlay,
-                               enforce_initials=enforce_initials, roi_config=roi_config)
-            results.append({"pair": [p1, p2], "result": res})
-            with open(os.path.join(pair_outdir, "result.json"), "w", encoding="utf-8") as f:
-                json.dump(res, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            results.append({"pair": [p1, p2], "error": str(e)})
-    return {"count": len(results), "items": results}
-
 # ----------------------------
 # CLI
 # ----------------------------
@@ -764,86 +520,22 @@ def main():
     ap.add_argument("--enforce-initials", action="store_true",
                     help="If patronymic doesn't start with normalized initial, set it to null")
     ap.add_argument("--roi-config", help="Path to JSON with ROIs per variant (ua/ru) to override defaults", default=None)
-
-    # Downloader options
-    ap.add_argument("--download-start", type=int, help="Start number (inclusive) for URL template {i}")
-    ap.add_argument("--download-end", type=int, help="End number (inclusive) for URL template {i}")
-    ap.add_argument(
-        "--download-url-template",
-        default="https://e-resource.tsdavo.gov.ua/static/files/143/{i}.jpg",
-        help="URL template containing {i} placeholder"
-    )
-    ap.add_argument("--download-dir", default="./downloads", help="Directory to save downloaded images")
-    ap.add_argument("--download-user-agent", default=DEFAULT_USER_AGENT, help="HTTP User-Agent to use")
-    ap.add_argument("--download-sleep-min", type=float, default=1.0, help="Min seconds between requests")
-    ap.add_argument("--download-sleep-max", type=float, default=5.0, help="Max seconds between requests")
-    ap.add_argument("--download-timeout", type=int, default=30, help="HTTP timeout seconds")
-    ap.add_argument("--download-retries", type=int, default=2, help="Per-file retry attempts on failure")
-    ap.add_argument("--no-resume", action="store_true", help="Disable HTTP Range resume of partial .part files")
-    ap.add_argument("--download-then-batch", action="store_true", help="After download, run batch over --download-dir")
     args = ap.parse_args()
 
     roi_config = DEFAULT_ROIS
     if args.roi_config:
         roi_config = load_roi_config(args.roi_config)
 
-    result_obj: Dict[str, Any] = {}
-
-    # If download range specified, perform download first
-    if args.download_start is not None and args.download_end is not None:
-        dl_stats = download_image_range(
-            start=args.download_start,
-            end=args.download_end,
-            url_template=args.download_url_template,
-            dest_dir=args.download_dir,
-            user_agent=args.download_user_agent,
-            sleep_min=args.download_sleep_min,
-            sleep_max=args.download_sleep_max,
-            timeout=args.download_timeout,
-            retries=args.download_retries,
-            resume=(not args.no_resume),
-        )
-        result_obj["download"] = dl_stats
-
-        if args.download_then_batch:
-            batch_res = run_batch(
-                args.download_dir,
-                outdir=args.outdir,
-                pad=args.pad,
-                overlay=args.overlay,
-                enforce_initials=args.enforce_initials,
-                roi_config=roi_config,
-            )
-            result_obj["batch"] = batch_res
-            print(json.dumps(result_obj, ensure_ascii=False, indent=2))
-            return
-
-    # Regular modes
     if args.batch:
         res = run_batch(args.batch, outdir=args.outdir, pad=args.pad,
                         overlay=args.overlay, enforce_initials=args.enforce_initials, roi_config=roi_config)
-        if result_obj:
-            result_obj["batch"] = res
-            print(json.dumps(result_obj, ensure_ascii=False, indent=2))
-        else:
-            print(json.dumps(res, ensure_ascii=False, indent=2))
-        return
-    if args.page1 and args.page2:
+    elif args.page1 and args.page2:
         res = run_pipeline(args.page1, args.page2, outdir=args.outdir, pad=args.pad,
                            overlay=args.overlay, enforce_initials=args.enforce_initials, roi_config=roi_config)
-        if result_obj:
-            result_obj["single"] = res
-            print(json.dumps(result_obj, ensure_ascii=False, indent=2))
-        else:
-            print(json.dumps(res, ensure_ascii=False, indent=2))
-        return
+    else:
+        ap.error("Provide either two images (page1 page2) or --batch <folder>")
 
-    if result_obj:
-        # Only download was requested
-        print(json.dumps(result_obj, ensure_ascii=False, indent=2))
-        return
-
-    ap.error("Provide either two images (page1 page2), --batch <folder>, or --download-start/--download-end")
+    print(json.dumps(res, ensure_ascii=False, indent=2))
 
 if __name__ == "__main__":
     main()

@@ -54,32 +54,6 @@
                             <p><strong>Single Pair:</strong> Upload exactly 2 images (page1, page2)</p>
                             <p><strong>Batch Mode:</strong> Upload multiple images (will be paired automatically)</p>
                             <p class="text-muted small">Supported formats: PNG, JPG, JPEG</p>
-                            <hr>
-                            <h6 class="mb-2"><i class="fas fa-download"></i> Download Range</h6>
-                            <div class="mb-2">
-                                <label class="form-label">Start / End</label>
-                                <div class="input-group input-group-sm">
-                                    <input type="number" class="form-control" id="dlStart" placeholder="start">
-                                    <input type="number" class="form-control" id="dlEnd" placeholder="end">
-                                </div>
-                            </div>
-                            <div class="mb-2">
-                                <label class="form-label">URL Template</label>
-                                <input type="text" class="form-control form-control-sm" id="dlTemplate" value="https://e-resource.tsdavo.gov.ua/static/files/143/{i}.jpg">
-                                <div class="form-text">Use {i} as the numeric placeholder</div>
-                            </div>
-                            <div class="form-check form-switch mb-2">
-                                <input class="form-check-input" type="checkbox" id="dlThenBatch">
-                                <label class="form-check-label" for="dlThenBatch">Process immediately after download</label>
-                            </div>
-                            <div class="form-check form-switch mb-2">
-                                <input class="form-check-input" type="checkbox" id="dlClassify" checked>
-                                <label class="form-check-label" for="dlClassify">Classify pages and auto-pair</label>
-                            </div>
-                            <button class="btn btn-sm btn-outline-primary" id="dlRunBtn">
-                                <i class="fas fa-download"></i> Run Download
-                            </button>
-                            <div id="dlSummary" class="small text-muted mt-2" style="display:none;"></div>
                         </div>
                     </div>
                 </div>
