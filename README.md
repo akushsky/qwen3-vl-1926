@@ -127,6 +127,40 @@ docker-compose.yml             # Two-service stack (web + llm)
 
 ---
 
+## Downloader + Batch (CLI)
+
+You can now download a numeric range of published images directly from the CLI and optionally process them immediately in batch mode.
+
+Examples:
+
+1) Download only (polite delays, resume partials):
+```bash
+python kharkov1926_llm_pipeline_v6.py \
+  --download-start 1430863 \
+  --download-end   1431347 \
+  --download-url-template "https://e-resource.tsdavo.gov.ua/static/files/143/{i}.jpg" \
+  --download-dir ./downloads
+```
+
+2) Download then batch-process the downloaded folder:
+```bash
+python kharkov1926_llm_pipeline_v6.py \
+  --download-start 1430863 \
+  --download-end   1431347 \
+  --download-url-template "https://e-resource.tsdavo.gov.ua/static/files/143/{i}.jpg" \
+  --download-dir ./downloads \
+  --download-then-batch \
+  --outdir ./out --overlay --enforce-initials
+```
+
+Notes:
+- Uses a realistic default User-Agent; customize with `--download-user-agent` if needed.
+- Default sleep between requests is random in [1.0, 5.0] seconds; tweak with `--download-sleep-min`/`--download-sleep-max`.
+- Resumes partial downloads via HTTP Range and `.part` files by default; disable with `--no-resume`.
+- After download, you can also run batch separately: `--batch ./downloads`.
+
+---
+
 ## Troubleshooting
 
 LLM container shows "unhealthy" but logs look fine:

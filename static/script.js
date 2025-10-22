@@ -29,6 +29,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const loadingModalEl = document.getElementById('loadingModal');
     const loadingModal = loadingModalEl ? new bootstrap.Modal(loadingModalEl, { backdrop: 'static', keyboard: false }) : null;
 
+    // Downloader controls
+    const dlStart = document.getElementById('dlStart');
+    const dlEnd = document.getElementById('dlEnd');
+    const dlTemplate = document.getElementById('dlTemplate');
+    const dlThenBatch = document.getElementById('dlThenBatch');
+    const dlClassify = document.getElementById('dlClassify');
+    const dlRunBtn = document.getElementById('dlRunBtn');
+    const dlSummary = document.getElementById('dlSummary');
+
     let currentSessionId = null;
 
     function preventDefaults(e) {
@@ -252,6 +261,59 @@ document.addEventListener('DOMContentLoaded', () => {
     handleAreaDragAndDrop(batch);
     handleAreaBrowse(single);
     handleAreaBrowse(batch);
+
+    async function runDownload() {
+        const start = parseInt(dlStart && dlStart.value, 10);
+        const end = parseInt(dlEnd && dlEnd.value, 10);
+        const template = dlTemplate && dlTemplate.value || '';
+        if (!Number.isFinite(start) || !Number.isFinite(end) || !template.includes('{i}')) {
+            dlSummary.style.display = '';
+            dlSummary.textContent = 'Please enter valid start/end and a template containing {i}.';
+            return;
+        }
+        try {
+            showLoading(true);
+            dlSummary.style.display = 'none';
+            const body = {
+                start,
+                end,
+                url_template: template,
+                then_batch: !!(dlThenBatch && dlThenBatch.checked),
+                classify: !!(dlClassify && dlClassify.checked),
+                pad: parseFloat(opts.pad && opts.pad.value || '0.02'),
+                overlay: !!(opts.overlay && opts.overlay.checked),
+                enforce_initials: !!(opts.enforceInitials && opts.enforceInitials.checked)
+            };
+            const res = await fetch('/download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            currentSessionId = json.session_id || null;
+            const d = json.download || {};
+            dlSummary.style.display = '';
+            dlSummary.textContent = `Downloaded: ${d.downloaded || 0}, Skipped: ${d.skipped || 0}, Errors: ${(d.errors && d.errors.length) || 0}`;
+            if (json.classify) {
+                const cls = json.classify.classified || {};
+                const p1 = (cls.page1 && cls.page1.length) || 0;
+                const p2 = (cls.page2 && cls.page2.length) || 0;
+                const oth = (cls.other && cls.other.length) || 0;
+                dlSummary.textContent += ` | page1: ${p1}, page2: ${p2}, other: ${oth}`;
+            }
+            if (json.result) {
+                renderResults({ result: json.result });
+            }
+        } catch (e) {
+            dlSummary.style.display = '';
+            dlSummary.textContent = (e && e.message) ? e.message : 'Download failed';
+        } finally {
+            showLoading(false);
+        }
+    }
+
+    if (dlRunBtn) dlRunBtn.addEventListener('click', runDownload);
 
     if (downloadBtn) {
         downloadBtn.addEventListener('click', async () => {

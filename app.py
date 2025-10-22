@@ -8,11 +8,19 @@ Flask-based web interface for the LLM pipeline
 
 import os
 import json
-import tempfile
-import shutil
-from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_file
 from werkzeug.utils import secure_filename
-from kharkov1926_llm_pipeline_v6 import run_pipeline, run_batch, DEFAULT_ROIS, load_roi_config
+from kharkov1926_llm_pipeline_v6 import (
+    run_pipeline,
+    run_batch,
+    DEFAULT_ROIS,
+    load_roi_config,
+    download_image_range,
+    DEFAULT_USER_AGENT,
+    classify_directory,
+    pair_by_nearest,
+    run_batch_from_pairs,
+)
 import uuid
 
 app = Flask(__name__)
@@ -137,6 +145,104 @@ def upload_batch():
             'result': result
         })
         
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/download', methods=['POST'])
+def download_and_process():
+    try:
+        data = request.get_json(force=True, silent=False)
+        if not isinstance(data, dict):
+            return jsonify({'error': 'Invalid JSON payload'}), 400
+
+        # Required numeric range
+        start = data.get('start')
+        end = data.get('end')
+        if start is None or end is None:
+            return jsonify({'error': 'start and end are required'}), 400
+        try:
+            start = int(start)
+            end = int(end)
+        except Exception:
+            return jsonify({'error': 'start and end must be integers'}), 400
+        if end < start:
+            return jsonify({'error': 'end must be >= start'}), 400
+
+        # Options
+        url_template = data.get('url_template') or "https://e-resource.tsdavo.gov.ua/static/files/143/{i}.jpg"
+        user_agent = data.get('user_agent') or DEFAULT_USER_AGENT
+        sleep_min = float(data.get('sleep_min') or 1.0)
+        sleep_max = float(data.get('sleep_max') or 5.0)
+        timeout = int(data.get('timeout') or 30)
+        retries = int(data.get('retries') or 2)
+        resume = bool(data.get('resume') if data.get('resume') is not None else True)
+        then_batch = bool(data.get('then_batch') or False)
+        classify = bool(data.get('classify') or False)
+
+        # Processing options for batch
+        pad = float(data.get('pad') or 0.02)
+        overlay = bool(data.get('overlay') or False)
+        enforce_initials = bool(data.get('enforce_initials') or False)
+
+        # Create session directories
+        session_id = str(uuid.uuid4())
+        session_dir = os.path.join(app.config['UPLOAD_FOLDER'], session_id)
+        os.makedirs(session_dir, exist_ok=True)
+        dl_dir = os.path.join(session_dir, 'downloads')
+        os.makedirs(dl_dir, exist_ok=True)
+
+        # Download
+        dl_stats = download_image_range(
+            start=start,
+            end=end,
+            url_template=url_template,
+            dest_dir=dl_dir,
+            user_agent=user_agent,
+            sleep_min=sleep_min,
+            sleep_max=sleep_max,
+            timeout=timeout,
+            retries=retries,
+            resume=resume,
+        )
+
+        response = {
+            'success': True,
+            'session_id': session_id,
+            'download': dl_stats
+        }
+
+        # Optionally classify and/or process batch
+        if classify:
+            cls = classify_directory(dl_dir)
+            response['classify'] = cls
+            if then_batch:
+                pairs = pair_by_nearest(cls.get('classified', {}))
+                result_dir = os.path.join(app.config['RESULTS_FOLDER'], session_id)
+                os.makedirs(result_dir, exist_ok=True)
+                result = run_batch_from_pairs(
+                    pairs,
+                    outdir=result_dir,
+                    pad=pad,
+                    overlay=overlay,
+                    enforce_initials=enforce_initials,
+                    roi_config=DEFAULT_ROIS
+                )
+                response['result'] = result
+        elif then_batch:
+            result_dir = os.path.join(app.config['RESULTS_FOLDER'], session_id)
+            os.makedirs(result_dir, exist_ok=True)
+            result = run_batch(
+                dl_dir,
+                outdir=result_dir,
+                pad=pad,
+                overlay=overlay,
+                enforce_initials=enforce_initials,
+                roi_config=DEFAULT_ROIS
+            )
+            response['result'] = result
+
+        return jsonify(response)
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
