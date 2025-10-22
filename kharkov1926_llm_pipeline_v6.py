@@ -335,11 +335,17 @@ USR_FIO = (
 
 # Page-type classifier (full-page image → page1 | page2 | other)
 SYS_CLASSIFY_PAGE = (
-    "На изображении одна страница из архива. Определи тип страницы:\n"
-    "- Если это первая страница семейной карточки (форма 2) с заголовком и анкетными пунктами 1..17 — ответь page1.\n"
-    "- Если это вторая страница (табличная, список семьи с графами возраст/занятие и т.п.) — ответь page2.\n"
-    "- Иначе (обложка, техническая, пустая, оборот, иное) — ответь other.\n"
-    "Верни строго JSON: {\"type\": \"page1\"|\"page2\"|\"other\", \"confidence\": 0..1}."
+    "Ты — точный классификатор сканов архивных листов (1926). Задача — определить ТИП СТРАНИЦЫ.\n\n"
+    "Опорные признаки:\n"
+    "page1: заголовок с крупным текстом \"Всесоюзный перепис... 1926\" / \"СІМЕЙНА КАРТКА\" / \"СЕМЕЙНАЯ КАРТА\"; структурированная анкета с пунктами ~1..17, короткие строки с подписями; нет плотной колонной таблицы.\n"
+    "page2: широкая таблица на всю страницу, много узких столбцов и десяток+ строк; слева вертикальные/горизонтальные линии, подписи вроде \"Число членов семьи\", \"Возраст\", \"Занятие\"; нет заголовка формы вверху.\n"
+    "other: обложка, оборотная сторона, пустые/технические листы, дубликаты с чужой разметкой и т.п.\n\n"
+    "Важно: верни только одно из page1/page2/other. Не путай из-за рукописных пометок.\n"
+    "Верни СТРОГО JSON без комментариев: {\n"
+    "  \"type\": \"page1\"|\"page2\"|\"other\",\n"
+    "  \"confidence\": 0..1,\n"
+    "  \"reason\": \"кратко, какие признаки увидел\"\n"
+    "}."
 )
 
 # ----------------------------
@@ -402,13 +408,14 @@ def step_classify_page(full_img: Image.Image) -> Dict[str, Any]:
             {"type": "image_url", "image_url": {"url": b64_image(full_img, fmt="JPEG")}},
         ]},
     ]
-    content = call_vllm(messages, temperature=0.0, max_tokens=48)
+    content = call_vllm(messages, temperature=0.0, max_tokens=96)
     out = parse_json_or_extract(content)
     t = (out.get("type") if isinstance(out, dict) else None) or "other"
     if t not in ("page1", "page2", "other"):
         t = "other"
     conf = float(out.get("confidence") or 0.0) if isinstance(out, dict) else 0.0
-    return {"type": t, "confidence": conf}
+    reason = (out.get("reason") if isinstance(out, dict) else None) or ""
+    return {"type": t, "confidence": conf, "reason": reason, "raw": out}
 
 # ----------------------------
 # Variant-aware cropping
@@ -629,7 +636,7 @@ def run_batch(input_dir: str, outdir: str, pad: float, overlay: bool, enforce_in
             results.append({"pair": [p1, p2], "error": str(e)})
     return {"count": len(results), "items": results}
 
-def classify_directory(input_dir: str) -> Dict[str, Any]:
+def classify_directory(input_dir: str, log_path: str = None) -> Dict[str, Any]:
     """Classify all images in a directory into page1/page2/other using LLM.
     Returns dict with lists and per-file scores.
     """
@@ -648,6 +655,13 @@ def classify_directory(input_dir: str) -> Dict[str, Any]:
             c = float(res.get("confidence") or 0.0)
             classified.get(t, classified["other"]).append(fp)
             details[fp] = {"type": t, "confidence": c}
+            if log_path:
+                try:
+                    with open(log_path, "a", encoding="utf-8") as lf:
+                        log_item = {"file": fp, "type": t, "confidence": c, "reason": res.get("reason"), "raw": res.get("raw")}
+                        lf.write(json.dumps(log_item, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
         except Exception as e:
             details[fp] = {"type": "error", "error": str(e)}
             classified["other"].append(fp)

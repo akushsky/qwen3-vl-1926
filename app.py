@@ -213,8 +213,10 @@ def download_and_process():
 
         # Optionally classify and/or process batch
         if classify:
-            cls = classify_directory(dl_dir)
+            cls_log = os.path.join(session_dir, '_classify.jsonl')
+            cls = classify_directory(dl_dir, log_path=cls_log)
             response['classify'] = cls
+            response['classify_log'] = os.path.relpath(cls_log, start=session_dir)
             if then_batch:
                 pairs = pair_by_nearest(cls.get('classified', {}))
                 result_dir = os.path.join(app.config['RESULTS_FOLDER'], session_id)
