@@ -103,6 +103,16 @@ def b64_image(img: Image.Image, fmt="JPEG", quality=92) -> str:
     b64 = base64.b64encode(bio.getvalue()).decode("ascii")
     return f"data:{mime};base64,{b64}"
 
+def downscale_if_needed(img: Image.Image, max_side: int = 1200) -> Image.Image:
+    """Downscale large images to keep payload small while preserving aspect ratio."""
+    w, h = img.size
+    m = max(w, h)
+    if m <= max_side:
+        return img
+    scale = max_side / float(m)
+    new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+    return img.resize(new_size)
+
 # ----------------------------
 # Downloader (polite range fetcher)
 # ----------------------------
@@ -340,6 +350,7 @@ SYS_CLASSIFY_PAGE = (
     "page1: заголовок с крупным текстом \"Всесоюзный перепис... 1926\" / \"СІМЕЙНА КАРТКА\" / \"СЕМЕЙНАЯ КАРТА\"; структурированная анкета с пунктами ~1..17, короткие строки с подписями; нет плотной колонной таблицы.\n"
     "page2: широкая таблица на всю страницу, много узких столбцов и десяток+ строк; слева вертикальные/горизонтальные линии, подписи вроде \"Число членов семьи\", \"Возраст\", \"Занятие\"; нет заголовка формы вверху.\n"
     "other: обложка, оборотная сторона, пустые/технические листы, дубликаты с чужой разметкой и т.п.\n\n"
+    "Тебе даны ДВА обрезка одной страницы: (1) верхняя полоса (header), (2) левая полоса таблицы (left).\n"
     "Важно: верни только одно из page1/page2/other. Не путай из-за рукописных пометок.\n"
     "Верни СТРОГО JSON без комментариев: {\n"
     "  \"type\": \"page1\"|\"page2\"|\"other\",\n"
@@ -400,12 +411,21 @@ def step_fio_left(img_cropped: Image.Image, surname_right: str, init_name: str, 
     content = call_vllm(messages, temperature=0.0, max_tokens=180)
     return parse_json_or_extract(content)
 
-def step_classify_page(full_img: Image.Image) -> Dict[str, Any]:
+def step_classify_page_from_crops(full_img: Image.Image) -> Dict[str, Any]:
+    # Two informative regions: top header band and left table/sidebar band
+    w, h = full_img.size
+    # Header band: central horizontal strip near top
+    header_crop, _ = crop_percent(full_img, (0.08, 0.02, 0.92, 0.20), pad=0.0)
+    # Left band: left vertical region excluding very top (to catch page2 table sidebar)
+    left_crop, _ = crop_percent(full_img, (0.00, 0.12, 0.26, 0.96), pad=0.0)
+    header_small = downscale_if_needed(header_crop, 900)
+    left_small = downscale_if_needed(left_crop, 900)
     messages = [
         {"role": "system", "content": SYS_CLASSIFY_PAGE},
         {"role": "user", "content": [
-            {"type": "text", "text": "Определи тип страницы: page1/page2/other. Верни РОВНО JSON."},
-            {"type": "image_url", "image_url": {"url": b64_image(full_img, fmt="JPEG")}},
+            {"type": "text", "text": "Даны две вырезки одной страницы: header (верх), left (левая полоса). Определи тип: page1/page2/other. Верни РОВНО JSON."},
+            {"type": "image_url", "image_url": {"url": b64_image(header_small, fmt="JPEG", quality=85)}},
+            {"type": "image_url", "image_url": {"url": b64_image(left_small, fmt="JPEG", quality=85)}},
         ]},
     ]
     content = call_vllm(messages, temperature=0.0, max_tokens=96)
@@ -650,7 +670,7 @@ def classify_directory(input_dir: str, log_path: str = None) -> Dict[str, Any]:
     for fp in files:
         try:
             im = Image.open(fp)
-            res = step_classify_page(im)
+            res = step_classify_page_from_crops(im)
             t = res.get("type", "other")
             c = float(res.get("confidence") or 0.0)
             classified.get(t, classified["other"]).append(fp)
