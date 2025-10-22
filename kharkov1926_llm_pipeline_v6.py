@@ -113,6 +113,17 @@ def downscale_if_needed(img: Image.Image, max_side: int = 1200) -> Image.Image:
     new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
     return img.resize(new_size)
 
+def stack_vertical(top_img: Image.Image, bottom_img: Image.Image, padding: int = 8, bg=(255,255,255)) -> Image.Image:
+    """Stack two images vertically into a single composite (to fit 1-image models)."""
+    t = top_img.convert("RGB")
+    b = bottom_img.convert("RGB")
+    width = max(t.width, b.width)
+    height = t.height + padding + b.height
+    canvas = Image.new("RGB", (width, height), color=bg)
+    canvas.paste(t, (0, 0))
+    canvas.paste(b, (0, t.height + padding))
+    return canvas
+
 # ----------------------------
 # Downloader (polite range fetcher)
 # ----------------------------
@@ -420,12 +431,13 @@ def step_classify_page_from_crops(full_img: Image.Image) -> Dict[str, Any]:
     left_crop, _ = crop_percent(full_img, (0.00, 0.12, 0.26, 0.96), pad=0.0)
     header_small = downscale_if_needed(header_crop, 900)
     left_small = downscale_if_needed(left_crop, 900)
+    # Compose into a single image (top=header, bottom=left) due to 1-image limit
+    composite = stack_vertical(header_small, left_small, padding=6)
     messages = [
         {"role": "system", "content": SYS_CLASSIFY_PAGE},
         {"role": "user", "content": [
-            {"type": "text", "text": "Даны две вырезки одной страницы: header (верх), left (левая полоса). Определи тип: page1/page2/other. Верни РОВНО JSON."},
-            {"type": "image_url", "image_url": {"url": b64_image(header_small, fmt="JPEG", quality=85)}},
-            {"type": "image_url", "image_url": {"url": b64_image(left_small, fmt="JPEG", quality=85)}},
+            {"type": "text", "text": "На одном изображении сверху — header (верхняя полоса), снизу — left (левая полоса). Определи тип: page1/page2/other. Верни РОВНО JSON."},
+            {"type": "image_url", "image_url": {"url": b64_image(composite, fmt="JPEG", quality=85)}},
         ]},
     ]
     content = call_vllm(messages, temperature=0.0, max_tokens=96)
