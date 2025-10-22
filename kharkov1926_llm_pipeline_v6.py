@@ -27,7 +27,7 @@ Environment:
 """
 
 import os, io, re, json, base64, argparse, glob, shutil, time, random
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Optional, Callable
 from PIL import Image, ImageDraw
 import requests
 
@@ -135,11 +135,12 @@ DEFAULT_USER_AGENT = (
 def download_image_range(start: int, end: int, url_template: str,
                          dest_dir: str,
                          user_agent: str = DEFAULT_USER_AGENT,
-                         sleep_min: float = 1.0,
-                         sleep_max: float = 5.0,
+                         sleep_min: float = 0.0,
+                         sleep_max: float = 0.0,
                          timeout: int = 30,
                          retries: int = 2,
-                         resume: bool = True) -> Dict[str, Any]:
+                         resume: bool = True,
+                         per_file_callback: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
     """Download sequential images using a URL template with {i} placeholder.
 
     Writes to dest_dir with filenames derived from URL basename. Supports simple
@@ -194,6 +195,11 @@ def download_image_range(start: int, end: int, url_template: str,
                                     if chunk:
                                         f.write(chunk)
                         os.replace(part_path, final_path)
+                        if per_file_callback:
+                            try:
+                                per_file_callback(final_path)
+                            except Exception:
+                                pass
                         downloaded += 1
                         break
 
@@ -208,6 +214,11 @@ def download_image_range(start: int, end: int, url_template: str,
                             if chunk:
                                 f.write(chunk)
                     os.replace(part_path, final_path)
+                    if per_file_callback:
+                        try:
+                            per_file_callback(final_path)
+                        except Exception:
+                            pass
                     downloaded += 1
                     break
             except Exception as e:
@@ -218,7 +229,8 @@ def download_image_range(start: int, end: int, url_template: str,
                     time.sleep(random.uniform(sleep_min, sleep_max))
 
         # polite sleep between items regardless of outcome
-        time.sleep(random.uniform(sleep_min, sleep_max))
+        if sleep_max > 0.0 or sleep_min > 0.0:
+            time.sleep(random.uniform(sleep_min, sleep_max))
 
     return {"start": start, "end": end, "downloaded": downloaded, "skipped": skipped, "errors": errors}
 
