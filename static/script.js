@@ -26,10 +26,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const resultsSection = document.getElementById('resultsSection');
     const resultsContent = document.getElementById('resultsContent');
     const downloadBtn = document.getElementById('downloadResults');
+    const viewJsonBtn = document.getElementById('viewJson');
+    const progressEls = {
+        container: document.getElementById('progressContainer'),
+        bar: document.getElementById('progressBar'),
+        label: document.getElementById('progressLabel'),
+        percent: document.getElementById('progressPercent')
+    };
     const loadingModalEl = document.getElementById('loadingModal');
     const loadingModal = loadingModalEl ? new bootstrap.Modal(loadingModalEl, { backdrop: 'static', keyboard: false }) : null;
+    const imageModalEl = document.getElementById('imageModal');
+    const imageModal = imageModalEl ? new bootstrap.Modal(imageModalEl) : null;
+    const imageModalImg = document.getElementById('imageModalImg');
+    const jsonModalEl = document.getElementById('jsonModal');
+    const jsonModal = jsonModalEl ? new bootstrap.Modal(jsonModalEl) : null;
+    const jsonModalPre = document.getElementById('jsonModalPre');
 
     let currentSessionId = null;
+    let pollTimer = null;
+    let lastResultJson = null;
 
     function preventDefaults(e) {
         e.preventDefault();
@@ -205,43 +220,120 @@ document.addEventListener('DOMContentLoaded', () => {
         resultsContent.innerHTML = `
             <div class="results-grid">
                 <div class="result-card">
-                    <div class="result-header">
-                        <h6 class="result-title">Nationality</h6>
+                    <div class="result-header"><h6 class="result-title">Edit Result</h6></div>
+                    <div class="result-content">
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="editIsJewish" ${((nationality || {}).is_jewish ? 'checked' : '')}>
+                            <label class="form-check-label" for="editIsJewish">is_jewish</label>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" for="editFullFio">Full FIO</label>
+                            <input type="text" class="form-control" id="editFullFio" value="${[fio.surname || '', fio.name || '', fio.patronymic || ''].filter(Boolean).join(' ')}">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Page 1</label>
+                            <div>
+                                <img id="page1Thumb" src="/crops/${currentSessionId}/${encodeURIComponent((out.inputs && out.inputs.page1) || '')}" alt="Page 1" style="max-width: 220px; height: auto; border: 1px solid #dee2e6; border-radius: 6px; cursor: pointer;" />
+                            </div>
+                            <small class="text-muted">Click to open full size</small>
+                        </div>
                     </div>
-                    <pre style="white-space:pre-wrap;">${natStr}</pre>
-                </div>
-                <div class="result-card">
-                    <div class="result-header">
-                        <h6 class="result-title">Right band (surname + initials)</h6>
-                    </div>
-                    <pre style="white-space:pre-wrap;">${rbStr}</pre>
-                </div>
-                <div class="result-card">
-                    <div class="result-header">
-                        <h6 class="result-title">FIO (final)</h6>
-                    </div>
-                    <pre style="white-space:pre-wrap;">${fioStr}</pre>
                 </div>
             </div>
         `;
+
+        const thumb = document.getElementById('page1Thumb');
+        if (thumb && imageModal && imageModalImg) {
+            thumb.addEventListener('click', () => {
+                imageModalImg.src = thumb.src;
+                imageModal.show();
+            });
+        }
+    }
+
+    function updateProgressUI(percent, stage) {
+        if (!progressEls.container) return;
+        progressEls.container.style.display = '';
+        const p = Math.max(0, Math.min(100, Number(percent) || 0));
+        if (progressEls.bar) progressEls.bar.style.width = `${p}%`;
+        if (progressEls.percent) progressEls.percent.textContent = `${p}%`;
+        if (progressEls.label) {
+            const map = {
+                queued: 'Queued',
+                started: 'Starting…',
+                variant_detected: 'Detected form variant',
+                crops_saved: 'Prepared crops',
+                nationality_done: 'Analyzed nationality',
+                right_band_done: 'Extracted surname and initials',
+                fio_done: 'Read full FIO',
+                assembled_output: 'Finalizing results',
+                completed: 'Completed'
+            };
+            progressEls.label.textContent = map[stage] || (stage || 'Processing…');
+        }
+    }
+
+    async function fetchAndRenderResults() {
+        if (!currentSessionId) return;
+        const res = await fetch(`/results/${currentSessionId}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        lastResultJson = json;
+        if (progressEls.container) progressEls.container.style.display = 'none';
+        renderResults(json);
+    }
+
+    function startPolling(sessionId) {
+        if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
+        updateProgressUI(0, 'queued');
+        const poll = async () => {
+            try {
+                const r = await fetch(`/progress/${sessionId}`);
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const j = await r.json();
+                updateProgressUI(j.progress || 0, j.stage || j.status);
+                if (j.status === 'done') {
+                    clearInterval(pollTimer);
+                    pollTimer = null;
+                    await fetchAndRenderResults();
+                } else if (j.status === 'error') {
+                    clearInterval(pollTimer);
+                    pollTimer = null;
+                    resultsSection.style.display = '';
+                    resultsContent.innerHTML = `<div class="error-message">${j.error || 'Processing failed'}</div>`;
+                }
+            } catch (e) {
+                // transient error; keep polling
+            }
+        };
+        poll();
+        pollTimer = setInterval(poll, 1200);
     }
 
     async function handleProcess(scope) {
         if (!scope.files || scope.files.length === 0) return;
         try {
-            showLoading(true);
             const isSingle = (scope === single);
             const url = isSingle ? '/upload' : '/batch';
             const data = await postFiles(url, scope.files);
             currentSessionId = data.session_id || null;
-            renderResults(data);
+            resultsSection.style.display = '';
+            resultsContent.innerHTML = '';
+            if (isSingle && currentSessionId) {
+                if (progressEls.container) progressEls.container.style.display = '';
+                startPolling(currentSessionId);
+            } else {
+                // Batch mode: render immediately (server returns full results)
+                renderResults(data);
+            }
         } catch (err) {
             resultsSection.style.display = '';
             resultsContent.innerHTML = `
                 <div class="error-message">${(err && err.message) ? err.message : 'Upload failed'}</div>
             `;
-        } finally {
-            showLoading(false);
         }
     }
 
@@ -270,6 +362,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 URL.revokeObjectURL(url);
             } catch (e) {
                 // noop; could show an error toast
+            }
+        });
+    }
+
+    if (viewJsonBtn && jsonModal && jsonModalPre) {
+        viewJsonBtn.addEventListener('click', async () => {
+            try {
+                if (!lastResultJson && currentSessionId) {
+                    const r = await fetch(`/results/${currentSessionId}`);
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    lastResultJson = await r.json();
+                }
+                jsonModalPre.textContent = JSON.stringify(lastResultJson || {}, null, 2);
+                jsonModal.show();
+            } catch (e) {
+                // ignore
             }
         });
     }

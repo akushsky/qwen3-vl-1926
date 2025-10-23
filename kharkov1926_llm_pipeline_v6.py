@@ -27,7 +27,7 @@ Environment:
 """
 
 import os, io, re, json, base64, argparse, glob, shutil
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Callable, Optional
 from PIL import Image, ImageDraw
 import requests
 
@@ -326,7 +326,8 @@ def initials_of_two(name: str, patr: str):
 # ----------------------------
 def run_pipeline(page1_path: str, page2_path: str, outdir: str="./crops",
                  pad: float=DEFAULT_PAD, overlay: bool=False,
-                 enforce_initials: bool=False, roi_config: Dict[str, Any]=None) -> Dict[str, Any]:
+                 enforce_initials: bool=False, roi_config: Dict[str, Any]=None,
+                 progress_cb: Optional[Callable[[int, str], None]] = None) -> Dict[str, Any]:
     ensure_dir(outdir)
     im1 = Image.open(page1_path)
     im2 = Image.open(page2_path)
@@ -335,6 +336,8 @@ def run_pipeline(page1_path: str, page2_path: str, outdir: str="./crops",
 
     # Detect form variant from page1 header
     det = detect_variant_from_page1(im1)
+    if progress_cb:
+        progress_cb(10, "variant_detected")
     variant = det["variant"]
     rois = get_rois(variant, roi_cfg)
 
@@ -347,6 +350,8 @@ def run_pipeline(page1_path: str, page2_path: str, outdir: str="./crops",
     p_nat  = os.path.join(outdir, f"{variant}_page1_nationality.jpg");   nat_img.save(p_nat, quality=95)
     p_fio  = os.path.join(outdir, f"{variant}_page1_fio_head.jpg");      fio_img.save(p_fio, quality=95)
     p_band = os.path.join(outdir, f"{variant}_page2_surname_band.jpg");  band_img.save(p_band, quality=95)
+    if progress_cb:
+        progress_cb(25, "crops_saved")
 
     # Optional overlays
     if overlay:
@@ -356,6 +361,8 @@ def run_pipeline(page1_path: str, page2_path: str, outdir: str="./crops",
     # 2) LLM: nationality + sanity
     nationality = step_nationality(nat_img)
     nationality = fix_nationality_sanity(nationality)
+    if progress_cb:
+        progress_cb(45, "nationality_done")
 
     # Manual review flag: non-jewish & confidence < 1.0
     needs_manual_review = (
@@ -371,9 +378,13 @@ def run_pipeline(page1_path: str, page2_path: str, outdir: str="./crops",
     initials_norm = normalize_initials_dict(initials_raw)
     init_name = initials_norm["name"]
     init_patr = initials_norm["patronymic"]
+    if progress_cb:
+        progress_cb(65, "right_band_done")
 
     # 4) LLM: left FIO -> final (with SOFT initials hint)
     fio = step_fio_left(fio_img, r_surname, init_name, init_patr)
+    if progress_cb:
+        progress_cb(85, "fio_done")
 
     # Optional post-check: enforce initials rule on patronymic
     if enforce_initials and isinstance(fio, dict):
@@ -427,6 +438,8 @@ def run_pipeline(page1_path: str, page2_path: str, outdir: str="./crops",
             "needs_manual_review": needs_manual_review
         }
     }
+    if progress_cb:
+        progress_cb(95, "assembled_output")
 
     # 6) Route to manual_review if needed
     if needs_manual_review:

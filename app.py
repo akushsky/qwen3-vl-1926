@@ -10,6 +10,8 @@ import os
 import json
 import tempfile
 import shutil
+import threading
+from typing import Dict, Any
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from werkzeug.utils import secure_filename
 from kharkov1926_llm_pipeline_v6 import run_pipeline, run_batch, DEFAULT_ROIS, load_roi_config
@@ -25,6 +27,49 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['RESULTS_FOLDER'], exist_ok=True)
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'JPG', 'JPEG', 'PNG'}
+
+# In-memory job store for progress tracking
+JOBS: Dict[str, Dict[str, Any]] = {}
+
+def update_progress(session_id: str, percent: int, message: str):
+    job = JOBS.get(session_id)
+    if job is None:
+        return
+    job['progress'] = max(0, min(100, int(percent)))
+    job['stage'] = message
+
+def run_job(session_id: str, page1_path: str, page2_path: str, pad: float, overlay: bool, enforce_initials: bool):
+    session_dir = os.path.join(app.config['UPLOAD_FOLDER'], session_id)
+    JOBS[session_id].update({
+        'status': 'running',
+        'progress': 5,
+        'stage': 'started'
+    })
+    try:
+        result = run_pipeline(
+            page1_path,
+            page2_path,
+            outdir=session_dir,
+            pad=pad,
+            overlay=overlay,
+            enforce_initials=enforce_initials,
+            progress_cb=lambda p, m: update_progress(session_id, p, m)
+        )
+        # Save result
+        result_file = os.path.join(session_dir, 'result.json')
+        with open(result_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        JOBS[session_id].update({
+            'status': 'done',
+            'progress': 100,
+            'stage': 'completed',
+            'result_file': result_file
+        })
+    except Exception as e:
+        JOBS[session_id].update({
+            'status': 'error',
+            'error': str(e)
+        })
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -64,30 +109,36 @@ def upload_files():
         pad = float(request.form.get('pad', 0.02))
         overlay = request.form.get('overlay') == 'true'
         enforce_initials = request.form.get('enforce_initials') == 'true'
-        
-        # Process the files
-        result = run_pipeline(
-            saved_files[0], 
-            saved_files[1], 
-            outdir=session_dir,
-            pad=pad,
-            overlay=overlay,
-            enforce_initials=enforce_initials
-        )
-        
-        # Save result
-        result_file = os.path.join(session_dir, 'result.json')
-        with open(result_file, 'w', encoding='utf-8') as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-        
+        # Initialize job
+        JOBS[session_id] = {
+            'status': 'queued',
+            'progress': 0,
+            'stage': 'queued'
+        }
+        # Start background thread
+        t = threading.Thread(target=run_job, args=(session_id, saved_files[0], saved_files[1], pad, overlay, enforce_initials), daemon=True)
+        t.start()
+
         return jsonify({
             'success': True,
-            'session_id': session_id,
-            'result': result
+            'session_id': session_id
         })
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/progress/<session_id>')
+def get_progress(session_id):
+    job = JOBS.get(session_id)
+    if not job:
+        return jsonify({'error': 'Session not found'}), 404
+    return jsonify({
+        'session_id': session_id,
+        'status': job.get('status'),
+        'progress': job.get('progress', 0),
+        'stage': job.get('stage', ''),
+        'error': job.get('error')
+    })
 
 @app.route('/batch', methods=['POST'])
 def upload_batch():

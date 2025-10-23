@@ -140,11 +140,25 @@
                         <div class="card">
                             <div class="card-header d-flex justify-content-between align-items-center">
                                 <h5><i class="fas fa-chart-line"></i> Processing Results</h5>
-                                <button class="btn btn-sm btn-outline-secondary" id="downloadResults">
-                                    <i class="fas fa-download"></i> Download Results
-                                </button>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-sm btn-outline-secondary" id="viewJson">
+                                        <i class="fas fa-code"></i> View JSON
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" id="downloadResults">
+                                        <i class="fas fa-download"></i> Download Results
+                                    </button>
+                                </div>
                             </div>
                             <div class="card-body">
+                                <div id="progressContainer" class="progress-container" style="display: none;">
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <small id="progressLabel">Waiting...</small>
+                                        <small id="progressPercent">0%</small>
+                                    </div>
+                                    <div class="progress">
+                                        <div class="progress-bar" id="progressBar" role="progressbar" style="width: 0%"></div>
+                                    </div>
+                                </div>
                                 <div id="resultsContent"></div>
                             </div>
                         </div>
@@ -160,6 +174,36 @@
                                     </div>
                                     <h5>Processing Documents...</h5>
                                     <p class="text-muted">This may take a few minutes</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Full Image Modal -->
+                    <div class="modal fade" id="imageModal" tabindex="-1">
+                        <div class="modal-dialog modal-lg modal-dialog-centered">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title"><i class="fas fa-image"></i> Page 1</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body text-center">
+                                    <img id="imageModalImg" src="" alt="Full" style="max-width: 100%; height: auto;" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- JSON Modal -->
+                    <div class="modal fade" id="jsonModal" tabindex="-1">
+                        <div class="modal-dialog modal-xl modal-dialog-centered">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title"><i class="fas fa-code"></i> Recognition JSON</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <pre id="jsonModalPre" style="white-space: pre-wrap; max-height: 60vh; overflow: auto;"></pre>
                                 </div>
                             </div>
                         </div>
