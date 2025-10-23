@@ -148,6 +148,46 @@ def normalize_initials_dict(initials: dict) -> dict:
     }
 
 # ----------------------------
+# UA→RU name normalization (simple heuristic)
+# ----------------------------
+UA_NAME_MAP = {
+    # frequent Ukrainian→Russian given names
+    "АНДРІЙ": "АНДРЕЙ",
+    "СЕРГІЙ": "СЕРГЕЙ",
+    "ОЛЕКСІЙ": "АЛЕКСЕЙ",
+    "ЮРІЙ": "ЮРИЙ",
+    "МИКОЛА": "НИКОЛАЙ",
+    "ПАВЛО": "ПАВЕЛ",
+    "ЯКІВ": "ЯКОВ",
+    "ЛЮБОМИР": "ЛЮБОМИР",  # same
+}
+
+def ua_to_ru_word(word: str) -> str:
+    if not word:
+        return word
+    upper = word.upper().translate(UA2RU)
+    # dictionary overrides first
+    if upper in UA_NAME_MAP:
+        return UA_NAME_MAP[upper].title()
+    # fallback small heuristics for endings
+    # -ИЙ/ІЙ → ЕЙ (e.g., АНДРИЙ→АНДРЕЙ); handle after UA2RU mapping
+    if upper.endswith("ИЙ"):
+        upper = upper[:-2] + "ЕЙ"
+    # ІЄ → ИЕ already mapped to Е + ?; ensure 'ИЕ' for patterns like 'АНДРИЕВ'
+    upper = upper.replace("ИЕ", "ИЕ")
+    return upper.title()
+
+def normalize_fio_ua_to_ru(fio: dict) -> dict:
+    if not isinstance(fio, dict):
+        return fio
+    out = dict(fio)
+    for key in ("surname", "name", "patronymic"):
+        val = out.get(key)
+        if isinstance(val, str) and val:
+            out[key] = ua_to_ru_word(val)
+    return out
+
+# ----------------------------
 # Post-fix for nationality sanity (force true/false + reason)
 # ----------------------------
 NON_JEWISH_MARKERS = [
@@ -218,7 +258,8 @@ SYS_FIO = (
     "Изображение — ЛЕВАЯ вырезка (страница 1): строка с полным ФИО главы семьи. "
     "Дано подсказкой с правой вырезки (стр.2): фамилия ≈ «{surname_right}», инициалы: имя = «{init_name}», отчество = «{init_patronymic}».\n"
     "Нормализация инициалов: допускаются украинские буквы, перед применением приведи в русские: І→И, Ї→И, Є→Е, Ґ→Г. "
-    "Пиши ТОЛЬКО на русском (кириллица RU). Ё→Е допустимо.\n"
+    "Пиши ТОЛЬКО на русском (кириллица RU). Категорически запрещены украинские буквы в ответе (І, Ї, Є, Ґ). Всегда замени их на И, И, Е, Г. "
+    "Если распознал украинскую форму имени/фамилии — верни РУССКУЮ норму. Примеры: Андрій→Андрей, Сергій→Сергей, Олексій→Алексей, Юрій→Юрий. Ё→Е допустимо.\n"
     "Правила:\n"
     "1) Фамилию считывай ПРЕЖДЕ ВСЕГО со ЛЕВОЙ вырезки (она крупнее). Правую фамилию используй как мягкую проверку формы ПЕРВОЙ БУКВЫ и общих биграмм.\n"
     "2) Инициалы с правой вырезки — МЯГКАЯ ПОДСКАЗКА. Если левая вырезка чётко даёт имя/отчество, ОТДАЙ ПРИОРИТЕТ ЛЕВОЙ вырезке, даже если инициалы отличаются.\n"
@@ -383,6 +424,9 @@ def run_pipeline(page1_path: str, page2_path: str, outdir: str="./crops",
 
     # 4) LLM: left FIO -> final (with SOFT initials hint)
     fio = step_fio_left(fio_img, r_surname, init_name, init_patr)
+    # Normalize UA→RU for FIO fields to ensure Russian output
+    if isinstance(fio, dict):
+        fio = normalize_fio_ua_to_ru(fio)
     if progress_cb:
         progress_cb(85, "fio_done")
 
@@ -484,10 +528,13 @@ def load_roi_config(path: str) -> Dict[str, Any]:
             raise ValueError(f"ROI config missing variant '{v}'")
     return cfg
 
-def run_batch(input_dir: str, outdir: str, pad: float, overlay: bool, enforce_initials: bool, roi_config: Dict[str, Any]) -> Dict[str, Any]:
+def run_batch(input_dir: str, outdir: str, pad: float, overlay: bool, enforce_initials: bool, roi_config: Dict[str, Any], progress_cb: Optional[Callable[[int, str], None]] = None) -> Dict[str, Any]:
     ensure_dir(outdir)
     pairs = discover_pairs(input_dir)
     results = []
+    total = max(1, len(pairs))
+    if progress_cb:
+        progress_cb(5, "batch_started")
     for p1, p2 in pairs:
         pair_name = f"{os.path.splitext(os.path.basename(p1))[0]}__{os.path.splitext(os.path.basename(p2))[0]}"
         pair_outdir = os.path.join(outdir, pair_name)
@@ -517,6 +564,11 @@ def run_batch(input_dir: str, outdir: str, pad: float, overlay: bool, enforce_in
 
         except Exception as e:
             results.append({"pair": [p1, p2], "error": str(e)})
+        # update progress after each pair
+        if progress_cb:
+            done = len(results)
+            percent = 5 + int(done * 90 / total)
+            progress_cb(percent, f"pair_{done}_of_{total}")
     return {"count": len(results), "items": results}
 
 # ----------------------------

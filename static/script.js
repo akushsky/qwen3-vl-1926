@@ -40,7 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const imageModalImg = document.getElementById('imageModalImg');
     const jsonModalEl = document.getElementById('jsonModal');
     const jsonModal = jsonModalEl ? new bootstrap.Modal(jsonModalEl) : null;
-    const jsonModalPre = document.getElementById('jsonModalPre');
+    const jsonModalCode = document.getElementById('jsonModalCode');
 
     let currentSessionId = null;
     let pollTimer = null;
@@ -166,33 +166,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 const r = it.result || {};
                 const variant = (r.variant && r.variant.detected) || '';
                 const nationality = (r.outputs && r.outputs.nationality) || {};
-                const rb = (r.outputs && r.outputs.right_band && (r.outputs.right_band.normalized || r.outputs.right_band)) || {};
                 const fio = (r.outputs && r.outputs.fio) || {};
-                const natStr = typeof nationality === 'object' ? JSON.stringify(nationality, null, 2) : String(nationality);
-                const fioStr = typeof fio === 'object' ? JSON.stringify({ surname: fio.surname, name: fio.name, patronymic: fio.patronymic, confidence: fio.confidence }, null, 2) : String(fio);
-                const rbStr = typeof rb === 'object' ? JSON.stringify(rb, null, 2) : String(rb);
-
-                const pair = Array.isArray(it.pair) ? it.pair.map(p => `<code>${p}</code>`).join(' , ') : '';
-
+                const page1Name = (r.inputs && r.inputs.page1) || '';
+                const fioValue = [fio.surname || '', fio.name || '', fio.patronymic || ''].filter(Boolean).join(' ');
                 return `
                 <div class="result-card">
                     <div class="result-header">
                         <h6 class="result-title">Pair ${idx + 1} ${variant ? `· Variant: ${variant}` : ''}</h6>
                     </div>
                     <div class="result-content">
-                        <div class="result-field"><span class="result-label">Inputs:</span><span class="result-value">${pair}</span></div>
-                    </div>
-                    <div class="result-content">
-                        <h6 class="result-title">Nationality</h6>
-                        <pre style="white-space:pre-wrap;">${natStr}</pre>
-                    </div>
-                    <div class="result-content">
-                        <h6 class="result-title">Right band (surname + initials)</h6>
-                        <pre style="white-space:pre-wrap;">${rbStr}</pre>
-                    </div>
-                    <div class="result-content">
-                        <h6 class="result-title">FIO (final)</h6>
-                        <pre style="white-space:pre-wrap;">${fioStr}</pre>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="editIsJewish_${idx}" ${((nationality || {}).is_jewish ? 'checked' : '')}>
+                            <label class="form-check-label" for="editIsJewish_${idx}">is_jewish</label>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" for="editFullFio_${idx}">Full FIO</label>
+                            <input type="text" class="form-control" id="editFullFio_${idx}" value="${fioValue}">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Page 1</label>
+                            <div>
+                                <img data-idx="${idx}" class="page1-thumb" src="/crops/${currentSessionId}/${encodeURIComponent(page1Name)}" alt="Page 1" style="max-width: 220px; height: auto; border: 1px solid #dee2e6; border-radius: 6px; cursor: pointer;" />
+                            </div>
+                            <small class="text-muted">Click to open full size</small>
+                        </div>
                     </div>
                 </div>`;
             }).join('');
@@ -206,6 +203,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="results-grid">${cards}</div>
             `;
+
+            // Wire up thumbnails
+            const thumbs = resultsContent.querySelectorAll('img.page1-thumb');
+            if (thumbs && imageModal && imageModalImg) {
+                thumbs.forEach(img => {
+                    img.addEventListener('click', () => {
+                        imageModalImg.src = img.src;
+                        imageModal.show();
+                    });
+                });
+            }
             return;
         }
 
@@ -322,7 +330,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentSessionId = data.session_id || null;
             resultsSection.style.display = '';
             resultsContent.innerHTML = '';
-            if (isSingle && currentSessionId) {
+            if (currentSessionId) {
                 if (progressEls.container) progressEls.container.style.display = '';
                 startPolling(currentSessionId);
             } else {
@@ -366,7 +374,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    if (viewJsonBtn && jsonModal && jsonModalPre) {
+    if (viewJsonBtn && jsonModal && jsonModalCode) {
         viewJsonBtn.addEventListener('click', async () => {
             try {
                 if (!lastResultJson && currentSessionId) {
@@ -374,7 +382,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!r.ok) throw new Error(`HTTP ${r.status}`);
                     lastResultJson = await r.json();
                 }
-                jsonModalPre.textContent = JSON.stringify(lastResultJson || {}, null, 2);
+                const text = JSON.stringify(lastResultJson || {}, null, 2);
+                jsonModalCode.textContent = text;
+                if (window.hljs) {
+                    try { window.hljs.highlightElement(jsonModalCode); } catch (_) {}
+                }
                 jsonModal.show();
             } catch (e) {
                 // ignore

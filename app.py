@@ -71,6 +71,39 @@ def run_job(session_id: str, page1_path: str, page2_path: str, pad: float, overl
             'error': str(e)
         })
 
+def run_batch_job(session_id: str, input_dir: str, pad: float, overlay: bool, enforce_initials: bool):
+    JOBS[session_id].update({
+        'status': 'running',
+        'progress': 5,
+        'stage': 'batch_started'
+    })
+    try:
+        outdir = os.path.join(app.config['RESULTS_FOLDER'], session_id)
+        result = run_batch(
+            input_dir,
+            outdir=outdir,
+            pad=pad,
+            overlay=overlay,
+            enforce_initials=enforce_initials,
+            roi_config=DEFAULT_ROIS,
+            progress_cb=lambda p, m: update_progress(session_id, p, m)
+        )
+        # Save a consolidated result in the upload session folder for unified retrieval
+        result_file = os.path.join(input_dir, 'result.json')
+        with open(result_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        JOBS[session_id].update({
+            'status': 'done',
+            'progress': 100,
+            'stage': 'completed',
+            'result_file': result_file
+        })
+    except Exception as e:
+        JOBS[session_id].update({
+            'status': 'error',
+            'error': str(e)
+        })
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -172,20 +205,18 @@ def upload_batch():
         overlay = request.form.get('overlay') == 'true'
         enforce_initials = request.form.get('enforce_initials') == 'true'
         
-        # Process batch
-        result = run_batch(
-            session_dir,
-            outdir=os.path.join(app.config['RESULTS_FOLDER'], session_id),
-            pad=pad,
-            overlay=overlay,
-            enforce_initials=enforce_initials,
-            roi_config=DEFAULT_ROIS
-        )
-        
+        # Initialize job and run in background
+        JOBS[session_id] = {
+            'status': 'queued',
+            'progress': 0,
+            'stage': 'queued'
+        }
+        t = threading.Thread(target=run_batch_job, args=(session_id, session_dir, pad, overlay, enforce_initials), daemon=True)
+        t.start()
+
         return jsonify({
             'success': True,
-            'session_id': session_id,
-            'result': result
+            'session_id': session_id
         })
         
     except Exception as e:
