@@ -41,6 +41,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const jsonModalEl = document.getElementById('jsonModal');
     const jsonModal = jsonModalEl ? new bootstrap.Modal(jsonModalEl) : null;
     const jsonModalCode = document.getElementById('jsonModalCode');
+    const uploadJrootsBtn = document.getElementById('uploadJroots');
+    const jrootsTokenInput = document.getElementById('jrootsToken');
+    const jrootsSourceSelect = document.getElementById('jrootsImageSource');
+    const jrootsImageKeyInput = document.getElementById('jrootsImageKey');
+    const jrootsImagePathInput = document.getElementById('jrootsImagePath');
 
     let currentSessionId = null;
     let pollTimer = null;
@@ -391,6 +396,154 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (e) {
                 // ignore
             }
+        });
+    }
+
+    // Upload to JROOTS
+    if (uploadJrootsBtn) {
+        uploadJrootsBtn.addEventListener('click', async () => {
+            try {
+                if (!currentSessionId) return;
+                const token = (jrootsTokenInput && jrootsTokenInput.value) || localStorage.getItem('JROOTS_API_TOKEN') || '';
+                if (token) localStorage.setItem('JROOTS_API_TOKEN', token);
+                const sourceId = (jrootsSourceSelect && jrootsSourceSelect.value) || localStorage.getItem('JROOTS_IMAGE_SOURCE_ID') || '';
+                if (sourceId) localStorage.setItem('JROOTS_IMAGE_SOURCE_ID', sourceId);
+                const imageKey = (jrootsImageKeyInput && jrootsImageKeyInput.value) || localStorage.getItem('JROOTS_IMAGE_KEY') || '';
+                if (imageKey) localStorage.setItem('JROOTS_IMAGE_KEY', imageKey);
+                const imagePath = (jrootsImagePathInput && jrootsImagePathInput.value) || localStorage.getItem('JROOTS_IMAGE_PATH') || '';
+                if (imagePath) localStorage.setItem('JROOTS_IMAGE_PATH', imagePath);
+                // Ensure we have the latest results
+                if (!lastResultJson) {
+                    const r = await fetch(`/results/${currentSessionId}`);
+                    if (r.ok) lastResultJson = await r.json();
+                }
+                const out = (lastResultJson && (lastResultJson.result || lastResultJson)) || {};
+                const entries = [];
+                const isBatch = Array.isArray(out.items);
+
+                if (isBatch) {
+                    // Collect from each card using current checkbox and FIO input values
+                    out.items.forEach((it, idx) => {
+                        const r = it.result || {};
+                        const inputs = (r.inputs || {});
+                        const page1 = inputs.page1 || '';
+                        const checkbox = document.getElementById(`editIsJewish_${idx}`);
+                        const fioInput = document.getElementById(`editFullFio_${idx}`);
+                        const isJew = !!(checkbox && checkbox.checked);
+                        const fioText = (fioInput && fioInput.value) || '';
+                        if (page1) {
+                            entries.push({
+                                is_jewish: isJew,
+                                page1,
+                                text_content: fioText,
+                                price: ''
+                            });
+                        }
+                    });
+                } else {
+                    // Single result
+                    const r = out || {};
+                    const inputs = (r.inputs || {});
+                    const page1 = inputs.page1 || '';
+                    const checkbox = document.getElementById('editIsJewish');
+                    const fioInput = document.getElementById('editFullFio');
+                    const isJew = !!(checkbox && checkbox.checked);
+                    const fioText = (fioInput && fioInput.value) || '';
+                    if (page1) {
+                        entries.push({ is_jewish: isJew, page1, text_content: fioText, price: '' });
+                    }
+                }
+
+                // Send only entries (backend filters again)
+                const resp = await fetch('/export/jroots', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: currentSessionId, entries, api_token: token, image_source_id: sourceId, image_key: imageKey, image_path: imagePath, price: 5000 })
+                });
+                const j = await resp.json().catch(() => ({}));
+
+                const ok = resp.ok && j && j.success;
+                const msg = ok ? `Uploaded ${j.uploaded || 0} entries to JROOTS.` : (`Upload failed: ${j.error || resp.status}`);
+                const box = document.createElement('div');
+                box.className = ok ? 'success-message' : 'error-message';
+                box.textContent = msg;
+                resultsContent.prepend(box);
+            } catch (e) {
+                const box = document.createElement('div');
+                box.className = 'error-message';
+                box.textContent = `Upload failed: ${e && e.message ? e.message : e}`;
+                resultsContent.prepend(box);
+            }
+        });
+    }
+
+    // Token persistence behavior
+    if (jrootsTokenInput) {
+        const saved = localStorage.getItem('JROOTS_API_TOKEN');
+        if (saved) jrootsTokenInput.value = saved;
+        jrootsTokenInput.addEventListener('change', async () => {
+            const tokenVal = jrootsTokenInput.value;
+            if (tokenVal) {
+                localStorage.setItem('JROOTS_API_TOKEN', tokenVal);
+                // Reload sources when token changes
+                await loadSourcesWithToken(tokenVal);
+            } else {
+                localStorage.removeItem('JROOTS_API_TOKEN');
+                if (jrootsSourceSelect) {
+                    jrootsSourceSelect.innerHTML = '<option value="">Select source…</option>';
+                }
+            }
+        });
+    }
+
+    // Populate sources when token available
+    async function loadSourcesWithToken(token) {
+        try {
+            const r = await fetch('/jroots/image-sources', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ api_token: token })
+            });
+            if (!r.ok) return;
+            const arr = await r.json();
+            if (!Array.isArray(arr) || !jrootsSourceSelect) return;
+            const savedId = localStorage.getItem('JROOTS_IMAGE_SOURCE_ID') || '';
+            jrootsSourceSelect.innerHTML = '<option value="">Select source…</option>' + arr.map(s => {
+                const id = String(s.id);
+                const label = `${s.source_name} — ${s.description || ''}`;
+                const sel = savedId && savedId === id ? ' selected' : '';
+                return `<option value="${id}"${sel}>${label}</option>`;
+            }).join('');
+        } catch (_) {}
+    }
+
+    if (jrootsSourceSelect) {
+        const token = (jrootsTokenInput && jrootsTokenInput.value) || localStorage.getItem('JROOTS_API_TOKEN');
+        if (token) loadSourcesWithToken(token);
+        jrootsSourceSelect.addEventListener('change', () => {
+            if (jrootsSourceSelect.value) {
+                localStorage.setItem('JROOTS_IMAGE_SOURCE_ID', jrootsSourceSelect.value);
+            } else {
+                localStorage.removeItem('JROOTS_IMAGE_SOURCE_ID');
+            }
+        });
+    }
+
+    if (jrootsImageKeyInput) {
+        const saved = localStorage.getItem('JROOTS_IMAGE_KEY');
+        if (saved) jrootsImageKeyInput.value = saved;
+        jrootsImageKeyInput.addEventListener('change', () => {
+            if (jrootsImageKeyInput.value) localStorage.setItem('JROOTS_IMAGE_KEY', jrootsImageKeyInput.value);
+            else localStorage.removeItem('JROOTS_IMAGE_KEY');
+        });
+    }
+
+    if (jrootsImagePathInput) {
+        const saved = localStorage.getItem('JROOTS_IMAGE_PATH');
+        if (saved) jrootsImagePathInput.value = saved;
+        jrootsImagePathInput.addEventListener('change', () => {
+            if (jrootsImagePathInput.value) localStorage.setItem('JROOTS_IMAGE_PATH', jrootsImagePathInput.value);
+            else localStorage.removeItem('JROOTS_IMAGE_PATH');
         });
     }
 });

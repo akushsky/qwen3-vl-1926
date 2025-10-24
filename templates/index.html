@@ -46,6 +46,35 @@
                         </div>
                     </div>
 
+                    <!-- JROOTS API Token -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5><i class="fas fa-key"></i> JROOTS</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label for="jrootsToken" class="form-label">API Token</label>
+                                <input type="password" class="form-control" id="jrootsToken" placeholder="Paste JROOTS API token" autocomplete="off">
+                                <small class="text-muted">Stored locally in your browser.</small>
+                            </div>
+                            <div class="mb-3">
+                                <label for="jrootsImageSource" class="form-label">Image Source</label>
+                                <select id="jrootsImageSource" class="form-select">
+                                    <option value="">Select source…</option>
+                                </select>
+                                <small class="text-muted">Loaded from JROOTS using your token.</small>
+                            </div>
+                            <div class="mb-3">
+                                <label for="jrootsImageKey" class="form-label">image_key</label>
+                                <input type="text" class="form-control" id="jrootsImageKey" placeholder="e.g. session:filename.jpg">
+                            </div>
+                            <div class="mb-3">
+                                <label for="jrootsImagePath" class="form-label">image_path</label>
+                                <input type="text" class="form-control" id="jrootsImagePath" placeholder="e.g. /uploads/{session}/{page1}">
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Instructions -->
                     <div class="card">
                         <div class="card-header">
@@ -147,6 +176,9 @@
                                     </button>
                                     <button class="btn btn-sm btn-outline-secondary" id="downloadResults">
                                         <i class="fas fa-download"></i> Download Results
+                                    </button>
+                                    <button class="btn btn-sm btn-primary" id="uploadJroots">
+                                        <i class="fas fa-cloud-upload-alt"></i> Upload Jewish to JROOTS
                                     </button>
                                 </div>
                             </div>

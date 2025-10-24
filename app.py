@@ -6,16 +6,18 @@ Kharkov-1926 Web Application
 Flask-based web interface for the LLM pipeline
 """
 
-import os
 import json
-import tempfile
-import shutil
+import os
+import hashlib
 import threading
-from typing import Dict, Any
-from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
-from werkzeug.utils import secure_filename
-from kharkov1926_llm_pipeline_v6 import run_pipeline, run_batch, DEFAULT_ROIS, load_roi_config
 import uuid
+from typing import Dict, Any
+
+from flask import Flask, render_template, request, jsonify, send_file
+from werkzeug.utils import secure_filename
+import requests
+
+from kharkov1926_llm_pipeline_v6 import run_pipeline, run_batch, DEFAULT_ROIS
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
@@ -30,6 +32,23 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'JPG', 'JPEG', 'PNG'}
 
 # In-memory job store for progress tracking
 JOBS: Dict[str, Dict[str, Any]] = {}
+
+# JROOTS API configuration (reuses CLI env names)
+JROOTS_API = os.environ.get('JROOTS_API', 'https://jroots.co')
+JROOTS_API_TOKEN = os.environ.get('JROOTS_API_TOKEN', '')
+JROOTS_HEADERS = {'Authorization': f'Bearer {JROOTS_API_TOKEN}'} if JROOTS_API_TOKEN else {}
+JROOTS_IMAGE_SOURCE_ID = os.environ.get('JROOTS_IMAGE_SOURCE_ID', 'kharkov1926')
+JROOTS_VERIFY_SSL = os.environ.get('JROOTS_VERIFY_SSL', 'false').lower() == 'true'
+
+def _sha512_of_file(path: str) -> str:
+    h = hashlib.sha512()
+    with open(path, 'rb') as f:
+        while True:
+            chunk = f.read(8192)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
 
 def update_progress(session_id: str, percent: int, message: str):
     job = JOBS.get(session_id)
@@ -257,6 +276,127 @@ def get_crop_image(session_id, filename):
         return jsonify({'error': 'Crop image not found'}), 404
     
     return send_file(file_path)
+
+@app.route('/export/jroots', methods=['POST'])
+def export_jroots():
+    try:
+        payload = request.get_json(silent=True) or {}
+        session_id = payload.get('session_id')
+        entries = payload.get('entries') or []
+        api_token_override = payload.get('api_token')
+        default_image_source_id = payload.get('image_source_id') or JROOTS_IMAGE_SOURCE_ID
+        default_image_key = payload.get('image_key') or ''
+        default_image_path = payload.get('image_path') or ''
+        default_price = str(payload.get('price') or '5000')
+        if not session_id:
+            return jsonify({'error': 'session_id is required'}), 400
+        if not isinstance(entries, list) or not entries:
+            return jsonify({'error': 'entries array is required'}), 400
+
+        upload_root = os.path.join(app.config['UPLOAD_FOLDER'], session_id)
+        if not os.path.isdir(upload_root):
+            return jsonify({'error': 'Upload session not found'}), 404
+
+        successes = 0
+        results = []
+
+        # Prepare headers (allow per-request override)
+        headers = dict(JROOTS_HEADERS)
+        if api_token_override:
+            headers['Authorization'] = f'Bearer {api_token_override}'
+
+        for idx, entry in enumerate(entries):
+            try:
+                # Only process explicitly marked Jewish
+                if not entry.get('is_jewish'):
+                    results.append({'index': idx, 'skipped': True, 'reason': 'not_jewish'})
+                    continue
+
+                page1 = entry.get('page1') or ''
+                text_content = entry.get('text_content') or ''
+                price = str(entry.get('price') or default_price)
+                image_source_id = entry.get('image_source_id') or default_image_source_id
+                image_key = entry.get('image_key') or default_image_key or f'{session_id}:{page1}'
+                image_path = entry.get('image_path') or default_image_path or f'/uploads/{session_id}/{page1}'
+
+                if not page1:
+                    results.append({'index': idx, 'error': 'missing page1 filename'})
+                    continue
+
+                img_path = os.path.join(upload_root, page1)
+                if not os.path.isfile(img_path):
+                    results.append({'index': idx, 'error': f'image not found: {page1}'})
+                    continue
+
+                # 1) Upload image (idempotent via sha512)
+                sha = _sha512_of_file(img_path)
+                img_data = {
+                    'image_key': image_key,
+                    'image_source_id': image_source_id,
+                    'image_path': image_path,
+                    'image_file_sha512': sha
+                }
+                with open(img_path, 'rb') as fp:
+                    files = {'image_file': fp}
+                    r = requests.post(f"{JROOTS_API}/api/admin/images", files=files, data=img_data,
+                                      headers=headers, verify=JROOTS_VERIFY_SSL, timeout=30)
+                    # Accept 200/201; allow 409 conflict as already exists
+                    if r.status_code not in (200, 201):
+                        try:
+                            detail = r.json()
+                        except Exception:
+                            detail = {'text': r.text}
+                        if r.status_code != 409:
+                            results.append({'index': idx, 'error': 'image_upload_failed', 'status': r.status_code, 'detail': detail})
+                            continue
+
+                # 2) Create object tied to image sha
+                obj_data = {
+                    'image_file_sha512': sha,
+                    'text_content': text_content,
+                    'price': price
+                }
+                r2 = requests.post(f"{JROOTS_API}/api/admin/objects", data=obj_data,
+                                   headers=headers, verify=JROOTS_VERIFY_SSL, timeout=30)
+                if r2.status_code not in (200, 201):
+                    try:
+                        detail2 = r2.json()
+                    except Exception:
+                        detail2 = {'text': r2.text}
+                    results.append({'index': idx, 'error': 'object_create_failed', 'status': r2.status_code, 'detail': detail2})
+                    continue
+
+                successes += 1
+                results.append({'index': idx, 'ok': True, 'sha512': sha})
+
+            except requests.RequestException as e:
+                results.append({'index': idx, 'error': 'network_error', 'detail': str(e)})
+            except Exception as e:
+                results.append({'index': idx, 'error': 'unexpected_error', 'detail': str(e)})
+
+        return jsonify({'success': True, 'uploaded': successes, 'results': results})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/jroots/image-sources', methods=['POST'])
+def jroots_image_sources():
+    try:
+        payload = request.get_json(silent=True) or {}
+        api_token = payload.get('api_token') or JROOTS_API_TOKEN
+        headers = {'Authorization': f'Bearer {api_token}'} if api_token else {}
+        r = requests.get(f"{JROOTS_API}/api/admin/image-sources", headers=headers, verify=JROOTS_VERIFY_SSL, timeout=30)
+        if r.status_code != 200:
+            try:
+                detail = r.json()
+            except Exception:
+                detail = {'text': r.text}
+            return jsonify({'error': 'failed_to_fetch_sources', 'status': r.status_code, 'detail': detail}), r.status_code
+        return jsonify(r.json())
+    except requests.RequestException as e:
+        return jsonify({'error': 'network_error', 'detail': str(e)}), 502
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/health')
 def health_check():
